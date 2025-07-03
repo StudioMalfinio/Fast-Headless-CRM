@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--global.checknewversion=false"
+      - "--global.sendanonymoususage=false"
+      - "--accesslog=true"
+      - "--log.level=WARN"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_AUTH}"
+      - "traefik.http.routers.redirect-to-https.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.redirect-to-https.entrypoints=web"
+      - "traefik.http.routers.redirect-to-https.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      - db
+      - redis
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://crm_user:${DB_PASSWORD}@db:5432/crm_prod
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-prod.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.app-prod.entrypoints=websecure"
+      - "traefik.http.routers.app-prod.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app-prod.loadbalancer.server.port=8000"
+      - "traefik.http.routers.app-prod.middlewares=prod-headers,rate-limit"
+      - "traefik.http.middlewares.prod-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.prod-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.rate-limit.ratelimit.average=100"
+      - "traefik.http.middlewares.rate-limit.ratelimit.period=1m"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=crm_prod
+      - POSTGRES_USER=crm_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm_user -d crm_prod"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_prod_data:
+  traefik_letsencrypt:

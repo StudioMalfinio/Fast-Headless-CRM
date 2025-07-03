@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@yourapp.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.staging.yourapp.com`)"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=admin:$$2y$$10$$example"
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      - ENVIRONMENT=staging
+      - DATABASE_URL=postgresql://crm_user:${DB_PASSWORD}@db:5432/crm_staging
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=false
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-staging.rule=Host(`staging.yourapp.com`)"
+      - "traefik.http.routers.app-staging.entrypoints=websecure"
+      - "traefik.http.routers.app-staging.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app-staging.loadbalancer.server.port=8000"
+      - "traefik.http.routers.app-staging.middlewares=staging-headers"
+      - "traefik.http.middlewares.staging-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=crm_staging
+      - POSTGRES_USER=crm_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_staging_data:
+  traefik_letsencrypt:

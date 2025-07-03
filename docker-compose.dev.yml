@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.api.address=:8080"
+    ports:
+      - "80:80"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=true"
+
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://crm_user:crm_password@db:5432/crm_dev
+      - SECRET_KEY=dev-secret-key-not-for-production
+      - DEBUG=true
+    volumes:
+      - .:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-dev.rule=Host(`localhost`)"
+      - "traefik.http.routers.app-dev.entrypoints=web"
+      - "traefik.http.services.app-dev.loadbalancer.server.port=8000"
+      - "traefik.http.routers.app-dev.middlewares=dev-headers"
+      - "traefik.http.middlewares.dev-headers.headers.accesscontrolalloworigin=*"
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=crm_dev
+      - POSTGRES_USER=crm_user
+      - POSTGRES_PASSWORD=crm_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_dev_data:
