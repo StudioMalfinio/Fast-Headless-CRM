@@ -25,3 +25,9 @@ class Deal(DatabaseModel):
     
     contact_id = Column(Integer, ForeignKey("contacts.id"))
     contact = relationship("Contact")
+    
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id"))
+    pipeline = relationship("Pipeline", back_populates="deals")
+    
+    stage_id = Column(Integer, ForeignKey("pipeline_stages.id"))
+    stage = relationship("PipelineStage", back_populates="deals")

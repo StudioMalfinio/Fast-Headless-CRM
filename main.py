@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import contacts, companies, deals, auth
+from app.api import contacts, companies, deals, auth, pipelines
 from app.models.base import Base
 from app.db.database import engine
 from app.core.config import settings
@@ -31,6 +31,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(contacts.router, prefix="/api/contacts", tags=["contacts"])
 app.include_router(companies.router, prefix="/api/companies", tags=["companies"])
 app.include_router(deals.router, prefix="/api/deals", tags=["deals"])
+app.include_router(pipelines.router, prefix="/api/pipelines", tags=["pipelines"])
 
 @app.get("/")
 async def root():
